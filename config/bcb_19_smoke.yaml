@@ -1,0 +1,9 @@
+exp_id: bcb_19_smoke
+seed: 12345
+data_path: dataset/BCB/pairs_canonical.csv
+sample: 1000
+metrics: ["t1","t2","t3","t4","t5","t6","t7","t8","t9","t10","t11","t12","t13","t14","t15","t16","t17","t18","t19"]
+num_workers: 12
+batch_size: 500
+stream_results: true
+output_dir: results/bcb_19_smoke

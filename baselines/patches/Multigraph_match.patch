@@ -1,0 +1,89 @@
+diff --git a/data/data_tool.py b/data/data_tool.py
+index 9c00694..d482999 100644
+--- a/data/data_tool.py
++++ b/data/data_tool.py
+@@ -46,6 +46,9 @@ def split_data_2(graph_dict_ast, graph_dict_cfg, graph_dict_dfg, labels: list, d
+         if file_name_1 in graph_dict_skip or file_name_2 in graph_dict_skip:
+             total_skip_length += 1
+             continue
++        if file_name_1 not in graph_dict_ast or file_name_2 not in graph_dict_ast:
++            total_skip_length += 1  # file failed parsing (same effect as forbideen_files)
++            continue
+         else:
+ 
+             if split_lable == 0:
+diff --git a/data/graph_builder/graph_builder.py b/data/graph_builder/graph_builder.py
+index e1dc56d..bee55b7 100644
+--- a/data/graph_builder/graph_builder.py
++++ b/data/graph_builder/graph_builder.py
+@@ -99,7 +99,18 @@ def build_graph(astdict, vocabdict, ast_edge, cfg_edge, dfg_edge, enrich_ast, sk
+                 get_cfg_edge(newtree, edgesrc, edgetgt, edge_attr)
+                 
+                 if dfg_edge:
+-                    newtree, edgesrc, edgetgt, edge_attr = get_dfg_edge(newtree, edgesrc, edgetgt, edge_attr)
++                    # FuseCC re-run guard: dfg_builder.py hard-exits
++                    # (exit(-1) -> SystemExit) on def-use-chain corner cases that some
++                    # BCB functions trigger (killed 3 whole runs at the same file).
++                    # Treat such files exactly like over-skip_length ones: add to
++                    # graph_dict_skip so split_data_2 drops (and counts) their pairs.
++                    try:
++                        newtree, edgesrc, edgetgt, edge_attr = get_dfg_edge(newtree, edgesrc, edgetgt, edge_attr)
++                    except SystemExit:
++                        file_name = os.path.splitext(os.path.basename(path))[0]
++                        print(f"DFG builder hard-exit on {file_name} -> file added to skip list (FuseCC guard)")
++                        graph_dict_skip.append(file_name)
++                        continue
+ 
+                 # delete unrequired edges
+                 if not cfg_edge:
+diff --git a/train/train_gmn.py b/train/train_gmn.py
+index c6b3091..5e6c6f5 100644
+--- a/train/train_gmn.py
++++ b/train/train_gmn.py
+@@ -7,6 +7,7 @@ import torch.nn.functional as F
+ from tqdm import tqdm, trange
+ from eval.load_eval import evaluation
+ import time
++import os
+ def transfer_label(label):
+     if label == 0:
+         return -1
+@@ -156,7 +157,28 @@ def train_gmn(MODEL_NAME, dataset, params, net_params, dirs):
+     criterion = nn.CosineEmbeddingLoss()
+     criterion2 = nn.MSELoss()
+ 
+-    epochs = trange(params['epochs'], leave=True, desc="Epoch")
++    # --- FuseCC patch 4/4: opt-in resume from a saved checkpoint ---------------
++    # Upstream saves model.state_dict() only (no optimizer/epoch state) and has no
++    # resume path, so an interrupted run must retrain from epoch 0.
++    # These two env vars let us continue an
++    # interrupted run from its last checkpoint; both unset = EXACTLY upstream
++    # behaviour, so any normal launch is unaffected.
++    #   MAGNET_RESUME_FROM : path to model_<N>.pth to load before training
++    #   MAGNET_START_EPOCH : first epoch index to run (i.e. N+1)
++    # CAVEAT, must be reported: Adam moment estimates restart at the resume
++    # boundary (they were never checkpointed). The LR is unaffected because
++    # scheduler.step() is commented out upstream (line ~239), so the LR is constant
++    # at init_lr for the whole run and nothing schedule-related is lost.
++    resume_from = os.environ.get('MAGNET_RESUME_FROM')
++    start_epoch = int(os.environ.get('MAGNET_START_EPOCH', '0'))
++    if resume_from:
++        model.load_state_dict(torch.load(resume_from, map_location=device))
++        log.info(f"[FuseCC resume] loaded weights from {resume_from}")
++        log.info(f"[FuseCC resume] resuming at epoch {start_epoch} "
++                 f"(Adam state reset at this boundary; LR constant at "
++                 f"{params['init_lr']})")
++
++    epochs = trange(start_epoch, params['epochs'], leave=True, desc="Epoch")
+     for epoch in epochs:
+         model.train()  # Set the model to training mode
+         batches = create_batches(trainset)
+@@ -245,6 +267,8 @@ def train_gmn(MODEL_NAME, dataset, params, net_params, dirs):
+ 
+         # Periodic evaluation and saving
+         if epoch % params['eval_epoch_interval'] == 0:
++            log.info(f"Start evaluation on valset in epoch: {epoch}")
++            evaluation_gmn(model, valset, params, net_params)
+             log.info(f"Start evaluation on testset in epoch: {epoch}")
+             evaluation_gmn(model, testset, params, net_params)
+         if epoch % params['save_epoch_interval'] == 0:

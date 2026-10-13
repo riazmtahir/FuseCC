@@ -1,0 +1,38 @@
+diff --git a/createclone_java.py b/createclone_java.py
+index 15a90c1..eccdc21 100644
+--- a/createclone_java.py
++++ b/createclone_java.py
+@@ -380,6 +380,8 @@ def createpairdata(treedict,pathlist,device):
+         #print(countlines)
+         countlines += 1
+         pairinfo = line.split()
++        if len(pairinfo) < 3:  # skip truncated/malformed lines (zip ships one)
++            continue
+         code1path = pairinfo[0].replace('\\', '/')
+         #code1path=pairinfo[0]
+         #print(pairinfo[0].replace('\\','/'))
+diff --git a/models.py b/models.py
+index 1af3724..a104fb2 100644
+--- a/models.py
++++ b/models.py
+@@ -3,10 +3,18 @@ import torch.nn as nn
+ from torch.nn import Parameter
+ import torch.nn.functional as F
+ from torch_geometric.nn import MessagePassing,GatedGraphConv
+-from torch_geometric.utils import degree, remove_self_loops, add_self_loops, softmax,scatter_
++from torch_geometric.utils import degree, remove_self_loops, add_self_loops, softmax
++# PyG 2.x compat: scatter_ removed; GlobalAttention moved/renamed
++from torch_geometric.utils import scatter as _pyg_scatter
++def scatter_(name, src, index, dim_size=None):
++    return _pyg_scatter(src, index, dim=0, dim_size=dim_size,
++                        reduce='sum' if name == 'add' else name)
+ #from torch_geometric.nn.conv import GATConv
+ from torch_geometric.nn.inits import glorot, zeros
+-from torch_geometric.nn.glob import GlobalAttention
++try:
++    from torch_geometric.nn import GlobalAttention
++except ImportError:
++    from torch_geometric.nn.aggr import AttentionalAggregation as GlobalAttention
+ import sys
+ import inspect
+ is_python2 = sys.version_info[0] < 3

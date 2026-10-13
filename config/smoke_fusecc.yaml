@@ -1,0 +1,3 @@
+exp_id: smoke_fusecc
+seed: 12345
+# sample: 100     # not used by the minimal runner, kept for future use

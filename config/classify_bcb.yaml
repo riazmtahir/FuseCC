@@ -1,0 +1,6 @@
+features_path: results/real_fusecc/results.csv
+output_dir: results/real_fusecc/classification
+n_splits: 5
+random_state: 12345
+n_iter: 30        # increase to 50-100 for more thorough tuning
+n_jobs: 8         # set to number of workers you want (e.g. nproc-1)

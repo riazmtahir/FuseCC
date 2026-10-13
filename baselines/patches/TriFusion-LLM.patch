@@ -1,0 +1,186 @@
+diff --git a/train.py b/train.py
+index 8b13789..68ac43b 100644
+--- a/train.py
++++ b/train.py
+@@ -1 +1,166 @@
++# train.py
++#
++# RE-RUN PROVENANCE NOTE (FuseCC baseline re-run):
++# The published TriFusion-LLM repo (github.com/LMD4790/TriFusion-LLM, commit
++# 51a091f "Update train.py") ships this file EMPTY, so the training loop below
++# was reconstructed around the authors' own published components — Model
++# (models/classifier.py), PairCodeDataset (data/dataset.py), evaluate_7class
++# (utils/metrics.py), checkpoint helpers (utils/checkpoint.py) and
++# save_best_results (utils/io_utils.py) — using the hyperparameters shipped in
++# config.py (AdamW lr 2e-5, eps 1e-8, linear warmup 80 steps, batch 32,
++# 5 epochs, grad-clip 1.0, AMP). Model selection: best validation F1-macro.
++# Everything model-/data-/metric-related is the authors' code, unmodified.
+ 
++import os
++import logging
++
++import torch
++from torch.optim import AdamW
++from torch.utils.data import DataLoader, RandomSampler
++from tqdm import tqdm
++
++from data.dataset import PairCodeDataset
++from utils.metrics import evaluate_7class
++from utils.checkpoint import (
++    save_checkpoint,
++    load_checkpoint_if_available,
++    _get_model_state,
++    _load_model_state_into,
++)
++from utils.io_utils import save_best_results
++
++try:
++    from transformers import get_linear_schedule_with_warmup
++except ImportError:
++    from torch.optim.lr_scheduler import LambdaLR
++
++    def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps):
++        def lr_lambda(step):
++            if step < num_warmup_steps:
++                return float(step) / float(max(1, num_warmup_steps))
++            return max(
++                0.0,
++                float(num_training_steps - step)
++                / float(max(1, num_training_steps - num_warmup_steps)),
++            )
++
++        return LambdaLR(optimizer, lr_lambda)
++
++logger = logging.getLogger(__name__)
++
++
++def train(args, train_samples, model, tokenizer, val_samples, test_samples, save_dir):
++    device = args.device
++    model.to(device)
++
++    train_dataset = PairCodeDataset(tokenizer, args, train_samples, tag="Train", n_jobs=24)
++    val_dataset = PairCodeDataset(tokenizer, args, val_samples, tag="Val", n_jobs=24)
++
++    train_loader = DataLoader(
++        train_dataset,
++        sampler=RandomSampler(train_dataset),
++        batch_size=args.train_batch_size,
++        num_workers=8,
++        pin_memory=True,
++    )
++
++    t_total = len(train_loader) * args.epoch
++    no_decay = ["bias", "LayerNorm.weight"]
++    grouped_params = [
++        {
++            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
++            "weight_decay": 0.01,
++        },
++        {
++            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
++            "weight_decay": 0.0,
++        },
++    ]
++    optimizer = AdamW(grouped_params, lr=args.learning_rate, eps=args.adam_epsilon)
++    scheduler = get_linear_schedule_with_warmup(
++        optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total
++    )
++    use_amp = device.type == "cuda"
++    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
++
++    start_epoch, history, best_val_f1_macro, best_epoch, best_val_results = 0, [], 0.0, 0, None
++    if getattr(args, "resume", False):
++        start_epoch, history, best_val_f1_macro, best_epoch, best_val_results = (
++            load_checkpoint_if_available(args, model, optimizer, scheduler, scaler, save_dir)
++        )
++
++    best_model_path = os.path.join(save_dir, f"best_model_seed_{args.seed}.pth")
++    logger.info(
++        f"Training: {len(train_dataset)} samples, {len(train_loader)} steps/epoch, "
++        f"epochs {start_epoch}..{args.epoch - 1}, device {device}"
++    )
++
++    for epoch in range(start_epoch, args.epoch):
++        model.train()
++        total_loss, steps = 0.0, 0
++        pbar = tqdm(train_loader, desc=f"Train epoch {epoch}")
++        for batch in pbar:
++            input_ids, struct_feats, labels = [x.to(device) for x in batch]
++            optimizer.zero_grad(set_to_none=True)
++            with torch.cuda.amp.autocast(enabled=use_amp):
++                loss, _ = model(input_ids=input_ids, struct_feats=struct_feats, labels=labels)
++            scaler.scale(loss).backward()
++            scaler.unscale_(optimizer)
++            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
++            scaler.step(optimizer)
++            scaler.update()
++            scheduler.step()
++            total_loss += loss.item()
++            steps += 1
++            if steps % 100 == 0:
++                pbar.set_postfix(avg_loss=f"{total_loss / steps:.4f}")
++
++        avg_loss = total_loss / max(1, steps)
++        logger.info(f"Epoch {epoch}: train loss {avg_loss:.4f}")
++
++        val_results = evaluate_7class(args, model, tokenizer, val_dataset, prefix=f"VAL-e{epoch}")
++        val_f1_macro = float(val_results["overall"]["f1_macro"])
++        history.append(
++            {
++                "epoch": epoch,
++                "train_loss": avg_loss,
++                "val_f1_macro": val_f1_macro,
++                "val_accuracy": float(val_results["overall"]["accuracy"]),
++            }
++        )
++
++        if val_f1_macro > best_val_f1_macro:
++            best_val_f1_macro = val_f1_macro
++            best_epoch = epoch
++            best_val_results = val_results
++            torch.save(_get_model_state(model), best_model_path)
++            logger.info(
++                f"Epoch {epoch}: NEW BEST val F1-macro {best_val_f1_macro:.4f} -> {best_model_path}"
++            )
++        else:
++            logger.info(
++                f"Epoch {epoch}: val F1-macro {val_f1_macro:.4f} "
++                f"(best {best_val_f1_macro:.4f} @ epoch {best_epoch})"
++            )
++
++        interval = getattr(args, "checkpoint_interval", 1) or 1
++        if epoch % interval == 0 or epoch == args.epoch - 1:
++            save_checkpoint(
++                epoch, model, optimizer, scheduler, scaler, history,
++                best_val_f1_macro, best_epoch, best_val_results, save_dir, args.seed,
++            )
++
++    if os.path.exists(best_model_path):
++        state_dict = torch.load(best_model_path, map_location=device)
++        _load_model_state_into(model, state_dict, device)
++        logger.info(f"Loaded best model (epoch {best_epoch}) for final test evaluation")
++    else:
++        logger.warning("No best model file found; evaluating the last-epoch weights")
++
++    test_dataset = PairCodeDataset(tokenizer, args, test_samples, tag="Test", n_jobs=24)
++    test_results = evaluate_7class(args, model, tokenizer, test_dataset, prefix="TEST-final")
++
++    if best_val_results is not None:
++        save_best_results(best_val_results, test_results, save_dir, args.seed, best_epoch)
++
++    return history
+diff --git a/utils/checkpoint.py b/utils/checkpoint.py
+index cc25808..f43f1ed 100644
+--- a/utils/checkpoint.py
++++ b/utils/checkpoint.py
+@@ -98,7 +98,9 @@ def load_checkpoint_if_available(args, model, optimizer, scheduler, scaler, save
+         return 0, [], 0.0, 0, None
+ 
+     logger.info(f"Found checkpoint: {ckpt_path}. Loading...")
+-    checkpoint = torch.load(ckpt_path, map_location=args.device)
++    # weights_only=False: torch>=2.6 defaults to True, which cannot unpickle the
++    # numpy objects stored in these checkpoints (compat patch for the re-run)
++    checkpoint = torch.load(ckpt_path, map_location=args.device, weights_only=False)
+ 
+     model_state = checkpoint.get("model_state")
+     if model_state is not None:

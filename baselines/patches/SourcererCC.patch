@@ -1,0 +1,26 @@
+diff --git a/clone-detector/runnodes.sh b/clone-detector/runnodes.sh
+index 0a1fdff..b444f9d 100755
+--- a/clone-detector/runnodes.sh
++++ b/clone-detector/runnodes.sh
+@@ -6,7 +6,7 @@ echo $rootPATH
+ ant -buildfile $rootPATH/build.xml clean cdi
+ mode="${1:-search}"
+ num_nodes="${2:-50}"
+-threshold="${3:-8}"
++threshold="${3:-7}"
+ echo "*****************************************************"
+ echo "running this script in $mode mode"
+ echo "*****************************************************"
+diff --git a/clone-detector/sourcerer-cc.properties b/clone-detector/sourcerer-cc.properties
+index 40f788c..12e4e8f 100644
+--- a/clone-detector/sourcerer-cc.properties
++++ b/clone-detector/sourcerer-cc.properties
+@@ -8,7 +8,7 @@ IS_STATUS_REPORTER_ON=true
+ #for recovery
+ LOG_PROCESSED_LINENUMBER_AFTER_X_LINES=50
+ # Ignore all files outside these bounds
+-MIN_TOKENS=65
++MIN_TOKENS=50
+ MAX_TOKENS=500000
+ 
+ # Sharding speeds up search for very large datasets (>200K files).

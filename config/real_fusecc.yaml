@@ -1,0 +1,9 @@
+exp_id: real_fusecc
+seed: 12345
+data_path: dataset/BCB/pairs_mapped.csv
+# remove or set sample for quick tests; omit for full run
+metrics: ["t1","t2","t3","t4","t5","t6","t7","t8","t9","t10","t11","t12","t13","t14","t15","t16"]
+num_workers: 11       # set to nproc - 1 (change to match your machine)
+batch_size: 1000
+stream_results: true
+output_dir: results/real_fusecc

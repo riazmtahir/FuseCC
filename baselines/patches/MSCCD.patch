@@ -1,0 +1,40 @@
+diff --git a/config.json b/config.json
+index 063ffb2..4a693e4 100644
+--- a/config.json
++++ b/config.json
+@@ -1,8 +1,8 @@
+ {
+     "inputProject": [
+-        "/Users/syu/workspace/ScalabilityTestGeneration/10K"
++        "<FUSECC_ROOT>/dataset/GCJ/googlejam4"
+     ],
+-    "keywordsList": "/Users/syu/workspace/MSCCD/grammarDefinations/java/Java.reserved",
++    "keywordsList": "<MSCCD_DIR>/grammarDefinations/java/Java.reserved",
+     "languageExtensionName": [
+         ".java"
+     ],
+@@ -11,7 +11,7 @@
+     "detectionThreshold": 0.7,
+     "maxRound": 4,
+     "tokenizer": "Java",
+-    "threadNum_tokenizer": 8,
+-    "threadNum_detection": 8,
++    "threadNum_tokenizer": 16,
++    "threadNum_detection": 16,
+     "outputFile": "./new.csv"
+-}
++}
+\ No newline at end of file
+diff --git a/controller.py b/controller.py
+index b0ad924..178a211 100644
+--- a/controller.py
++++ b/controller.py
+@@ -118,7 +118,7 @@ class MainController():
+         tokenizer           = os.path.abspath("./tokenizers/" + taskObj.configObj['tokenizer'] + "/" + taskObj.configObj['tokenizer'] + "_tokenizer.jar")
+         
+         
+-        os.system("java -Xmx4800m -jar " + tokenizer + ' 1 ' + str(para_mintoken) + ' ' + para_fileList + ' ' + para_keywords + " " + para_outputFilePath + " " + str(para_threadNum))
++        os.system("java -Xmx4800m -cp " + os.path.abspath("lib/antlr-4.8-modified.jar") + ":" + tokenizer + " org.nagoya_u.ertl.sa.App" + ' 1 ' + str(para_mintoken) + ' ' + para_fileList + ' ' + para_keywords + " " + para_outputFilePath + " " + str(para_threadNum))
+ 
+ 
+         print("#### Finished.")

@@ -1,0 +1,10 @@
+diff --git a/config/default.properties b/config/default.properties
+index 4f8754a..52d5032 100644
+--- a/config/default.properties
++++ b/config/default.properties
+@@ -1,4 +1,4 @@
+-THREADSIZE=3
++THREADSIZE=16
+ 
+ //METRIC=[NW,LEVENSHTEIN,LCS]
+ METRIC=LCS

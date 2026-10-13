@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+
+# Generated data, models and outputs (not tracked)
+dataset/
+results/
+models/
+logs/
+catboost_info/
+
+# Editors / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs and local environment
+*.log
+.env
